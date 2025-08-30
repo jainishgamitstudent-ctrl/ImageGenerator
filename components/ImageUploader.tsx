@@ -15,11 +15,42 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, onImageUpload, ico
     const handleFileChange = useCallback((file: File | null) => {
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64String = reader.result as string;
-                onImageUpload(base64String);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0);
+                        // Force conversion to PNG which is widely supported by the Gemini API
+                        const pngDataUrl = canvas.toDataURL('image/png');
+                        onImageUpload(pngDataUrl);
+                    } else {
+                        console.error("Could not get canvas context to convert image.");
+                        onImageUpload(null);
+                    }
+                };
+                img.onerror = () => {
+                    console.error("Error loading image for conversion. It might be corrupt.");
+                    onImageUpload(null);
+                };
+                
+                if (event.target?.result && typeof event.target.result === 'string') {
+                    img.src = event.target.result;
+                } else {
+                    console.error("FileReader did not return a valid result.");
+                    onImageUpload(null);
+                }
+            };
+            reader.onerror = (error) => {
+                console.error("Error reading file for conversion:", error);
+                onImageUpload(null);
             };
             reader.readAsDataURL(file);
+        } else {
+            onImageUpload(null);
         }
     }, [onImageUpload]);
     
@@ -53,14 +84,14 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, onImageUpload, ico
 
     return (
         <div className="flex flex-col items-center">
-            <h2 className="text-xl font-semibold text-gray-300 mb-4">{title}</h2>
+            <h2 className="text-lg font-semibold text-slate-700 mb-3">{title}</h2>
             <div 
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
                 onClick={onButtonClick}
-                className={`relative w-full h-64 md:h-80 border-2 border-dashed rounded-xl flex flex-col justify-center items-center cursor-pointer transition-all duration-300 ${isDragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-600 hover:border-indigo-500 hover:bg-gray-700/50'}`}
+                className={`relative w-full h-64 md:h-80 border-2 border-dashed rounded-xl flex flex-col justify-center items-center cursor-pointer transition-all duration-300 ${isDragging ? 'border-pink-500 bg-pink-50' : 'border-slate-300 hover:border-pink-400 hover:bg-slate-50/50'}`}
                 role="button"
                 aria-label={`Upload ${title}`}
             >
@@ -74,9 +105,9 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ title, onImageUpload, ico
                 {image ? (
                     <img src={image} alt="Preview" className="w-full h-full object-contain rounded-xl p-2" />
                 ) : (
-                    <div className="text-center text-gray-500 pointer-events-none">
-                        <div className="w-12 h-12 mx-auto mb-2 text-gray-400">{icon}</div>
-                        <p className="font-semibold">Drag & Drop or Click to Upload</p>
+                    <div className="text-center text-slate-500 pointer-events-none">
+                        <div className="w-10 h-10 mx-auto mb-2 text-slate-400">{icon}</div>
+                        <p className="font-semibold text-slate-600">Click or Drag & Drop</p>
                         <p className="text-sm">PNG, JPG, WEBP</p>
                     </div>
                 )}

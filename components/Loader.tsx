@@ -31,8 +31,8 @@ const Loader: React.FC<LoaderProps> = ({ messages = defaultMessages }) => {
 
     return (
         <div className="flex flex-col items-center justify-center my-12 text-center">
-            <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-indigo-500" role="status" aria-label="Loading"></div>
-            <p className="mt-4 text-lg text-gray-300 font-medium transition-opacity duration-500" aria-live="polite">
+            <div className="w-14 h-14 border-4 border-dashed rounded-full animate-spin border-pink-500" role="status" aria-label="Loading"></div>
+            <p className="mt-4 text-base text-slate-600 font-medium transition-opacity duration-500" aria-live="polite">
                 {messages[messageIndex]}
             </p>
         </div>

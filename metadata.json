@@ -1,5 +1,5 @@
 {
-  "name": "Virtual Try-On Assistant",
+  "name": "Copy of Virtual Try-On Assistant",
   "description": "An AI-powered assistant that uses Gemini to generate realistic images of you wearing different outfits. Upload your photo and an outfit image to see how it looks from multiple angles.",
   "requestFramePermissions": []
 }

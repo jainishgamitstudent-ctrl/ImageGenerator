@@ -24,7 +24,9 @@ const getMimeType = (base64: string): string => {
 export const generateTryOnImage = async (
     personImageBase64: string,
     outfitImageBase64: string,
-    view: ViewType
+    styleImageBase64: string | null,
+    view: ViewType,
+    customPrompt: string
 ): Promise<{ image: string | null; text: string | null; error: string | null; }> => {
     try {
         const personMimeType = getMimeType(personImageBase64);
@@ -33,16 +35,29 @@ export const generateTryOnImage = async (
         const personImagePart = fileToGenerativePart(personImageBase64, personMimeType);
         const outfitImagePart = fileToGenerativePart(outfitImageBase64, outfitMimeType);
 
+        const imageParts = [personImagePart, outfitImagePart];
+
+        if (styleImageBase64) {
+            const styleMimeType = getMimeType(styleImageBase64);
+            const styleImagePart = fileToGenerativePart(styleImageBase64, styleMimeType);
+            imageParts.push(styleImagePart);
+        }
+        
+        const stylePrompt = styleImageBase64
+            ? `\n**Style Reference:** A third image has been provided as a style reference. Apply its texture, pattern, or artistic style to the main outfit.`
+            : '';
+
         const prompt = `
-You are a virtual try-on assistant. Your task is to generate a photorealistic image of the person from the first image wearing the outfit from the second image.
+You are a virtual try-on assistant. Your task is to generate a high-resolution, photorealistic image of the person from the first image wearing the outfit from the second image. The final result should be indistinguishable from a real photograph.
 
 **View:** Generate a **${view}** of the person.
-
+${stylePrompt}
+${customPrompt && customPrompt.trim() !== '' ? `\n**User Instructions:** ${customPrompt.trim()}\n` : ''}
 **Requirements:**
+- **Quality:** The final image must be of the highest quality, appearing like a professional photograph. Pay close attention to detail.
 - **Fit:** The outfit must be fitted naturally onto the user's body shape and posture.
-- **Realism:** Maintain realistic fabric textures, shadows, and lighting.
+- **Realism:** Maintain hyper-realistic fabric textures, shadows, and lighting.
 - **Preservation:** Preserve the user's original facial features, hairstyle, and skin tone. Do not change the person's identity.
-- **Quality:** The final image must look like a real photograph, not a digital overlay or photoshop composite.
 - **Alignment:** Ensure the outfit alignment is correct.
 - **Background:** Place the person in a simple, neutral, light-gray studio background, consistent across all generated views.
 
@@ -55,8 +70,7 @@ You are a virtual try-on assistant. Your task is to generate a photorealistic im
             model: 'gemini-2.5-flash-image-preview',
             contents: {
                 parts: [
-                    personImagePart,
-                    outfitImagePart,
+                    ...imageParts,
                     { text: prompt },
                 ],
             },
@@ -88,7 +102,8 @@ You are a virtual try-on assistant. Your task is to generate a photorealistic im
 
     } catch (error) {
         console.error(`Error generating ${view}:`, error);
-        return { image: null, text: null, error: `Failed to generate the ${view}. Please check the console for details.` };
+        const errorMessage = error instanceof Error ? JSON.stringify({ error: { message: error.message } }) : String(error);
+        return { image: null, text: null, error: `Failed to generate the ${view}. Details: ${errorMessage}` };
     }
 };
 
@@ -98,7 +113,7 @@ export const generateTryOnVideo = async (
     try {
         const mimeType = getMimeType(frontViewImageBase64);
         
-        const prompt = `Animate the person in this image to perform a slow, smooth 360-degree turn. It is crucial to maintain the person's appearance, the outfit they are wearing, and the neutral light-gray studio background. The video should be about 5-10 seconds long.`;
+        const prompt = `Animate the person in this image to perform a slow, smooth 360-degree turn. It is crucial to maintain the person's appearance, the outfit they are wearing, and the neutral light-gray studio background. The final video's aspect ratio must be 1080x1920 (portrait mode) and should be about 5-10 seconds long.`;
 
         let operation = await ai.models.generateVideos({
             model: 'veo-2.0-generate-001',
