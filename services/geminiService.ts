@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
-import type { ViewType } from '../types';
+import type { ViewType, Quality, AnimationType, VideoDuration } from '../types';
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
@@ -26,7 +26,9 @@ export const generateTryOnImage = async (
     outfitImageBase64: string,
     styleImageBase64: string | null,
     view: ViewType,
-    customPrompt: string
+    customPrompt: string,
+    quality: Quality,
+    seed: number
 ): Promise<{ image: string | null; text: string | null; error: string | null; }> => {
     try {
         const personMimeType = getMimeType(personImageBase64);
@@ -42,24 +44,41 @@ export const generateTryOnImage = async (
             const styleImagePart = fileToGenerativePart(styleImageBase64, styleMimeType);
             imageParts.push(styleImagePart);
         }
+
+        const getQualityPrompt = () => {
+            switch (quality) {
+                case 'Standard':
+                    return 'Generate a high-quality, photorealistic image.';
+                case 'High':
+                    return 'Generate a high-resolution, photorealistic image. The final result should be indistinguishable from a real photograph.';
+                case 'Ultra':
+                    return 'Generate an ultra-high-resolution, hyper-realistic 4K image. The final result should be indistinguishable from professional photography, with flawless attention to lighting, shadows, and fabric textures.';
+            }
+        };
         
         const stylePrompt = styleImageBase64
             ? `\n**Style Reference:** A third image has been provided as a style reference. Apply its texture, pattern, or artistic style to the main outfit.`
             : '';
 
         const prompt = `
-You are a virtual try-on assistant. Your task is to generate a high-resolution, photorealistic image of the person from the first image wearing the outfit from the second image. The final result should be indistinguishable from a real photograph.
+You are a world-class virtual try-on assistant. Your task is to generate a single, static image based on the user's request.
+${getQualityPrompt()}
 
 **View:** Generate a **${view}** of the person.
 ${stylePrompt}
 ${customPrompt && customPrompt.trim() !== '' ? `\n**User Instructions:** ${customPrompt.trim()}\n` : ''}
-**Requirements:**
-- **Quality:** The final image must be of the highest quality, appearing like a professional photograph. Pay close attention to detail.
+**Core Requirements:**
 - **Fit:** The outfit must be fitted naturally onto the user's body shape and posture.
 - **Realism:** Maintain hyper-realistic fabric textures, shadows, and lighting.
-- **Preservation:** Preserve the user's original facial features, hairstyle, and skin tone. Do not change the person's identity.
-- **Alignment:** Ensure the outfit alignment is correct.
-- **Background:** Place the person in a simple, neutral, light-gray studio background, consistent across all generated views.
+- **Background:** Place the person in a simple, neutral, light-gray studio background.
+
+**Outfit Fidelity Mandate:**
+- **Preserve Original Design:** You MUST accurately transfer the complete design, pattern, color, and texture from the provided outfit image onto the person. The final look must be a faithful representation of the source outfit.
+- **No Alterations:** Do not add, remove, or change any design elements, logos, text, or patterns from the original outfit unless explicitly told to do so in the user instructions.
+
+**Consistency Mandate:**
+- You will be given a consistent seed value for each set of views (front, side, back). Use this to ensure the person's identity, facial features, hairstyle, skin tone, and all outfit details (color, texture, fit) remain absolutely identical across all generated images for this set.
+- **Do not change the person's identity.**
 
 **Error Handling:**
 - If the outfit in the second image is unclear or low-quality, respond with only the text: "ERROR: The provided outfit image is unclear. Please upload a higher-quality image for better results."
@@ -76,8 +95,19 @@ ${customPrompt && customPrompt.trim() !== '' ? `\n**User Instructions:** ${custo
             },
             config: {
                 responseModalities: [Modality.IMAGE, Modality.TEXT],
+                seed: seed,
             },
         });
+
+        if (!response.candidates || response.candidates.length === 0 || !response.candidates[0].content || !response.candidates[0].content.parts) {
+            const blockReason = response.promptFeedback?.blockReason;
+            let detailedError = "The model did not return a valid response.";
+            if (blockReason) {
+                detailedError = `The request was blocked. Reason: ${blockReason}.`;
+            }
+            console.error('Invalid response from API:', response);
+            return { image: null, text: null, error: `Failed to generate the ${view}. ${detailedError}` };
+        }
 
         let generatedImage: string | null = null;
         let responseText: string | null = null;
@@ -107,13 +137,27 @@ ${customPrompt && customPrompt.trim() !== '' ? `\n**User Instructions:** ${custo
     }
 };
 
+const getAnimationDescription = (animation: AnimationType): string => {
+    switch (animation) {
+        case 'Subtle Sway':
+            return 'Animate the person to perform a subtle, gentle swaying motion, as if they are standing and posing naturally for a photo.';
+        case 'Catwalk Pose':
+            return 'Animate the person to perform a confident catwalk strut towards the camera for a few steps, followed by a brief, elegant pose.';
+        case '360 Turn':
+        default:
+            return 'Animate the person to perform a slow, smooth 360-degree turn, showing the outfit from all angles.';
+    }
+};
+
 export const generateTryOnVideo = async (
-    frontViewImageBase64: string
+    frontViewImageBase64: string,
+    duration: VideoDuration,
+    animation: AnimationType,
 ): Promise<{ videoUrl: string | null; error: string | null; }> => {
     try {
         const mimeType = getMimeType(frontViewImageBase64);
         
-        const prompt = `Animate the person in this image to perform a slow, smooth 360-degree turn. It is crucial to maintain the person's appearance, the outfit they are wearing, and the neutral light-gray studio background. The final video's aspect ratio must be 1080x1920 (portrait mode) and should be about 5-10 seconds long.`;
+        const prompt = `Generate a video with a strict portrait aspect ratio of 1080x1920. The video should be ${duration} seconds long. ${getAnimationDescription(animation)} It is crucial to maintain the person's appearance, the outfit they are wearing, and the neutral light-gray studio background.`;
 
         let operation = await ai.models.generateVideos({
             model: 'veo-2.0-generate-001',

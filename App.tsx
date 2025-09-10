@@ -5,7 +5,7 @@ import ImageUploader from './components/ImageUploader';
 import GeneratedImages from './components/GeneratedImages';
 import Loader from './components/Loader';
 import { generateTryOnImage, generateTryOnVideo } from './services/geminiService';
-import type { GeneratedImage } from './types';
+import type { GeneratedImage, GeneratedResultGroup, Quality, AnimationType, VideoDuration } from './types';
 import { ViewType } from './types';
 import UserIcon from './components/icons/UserIcon';
 import OutfitIcon from './components/icons/OutfitIcon';
@@ -13,118 +13,133 @@ import StyleIcon from './components/icons/StyleIcon';
 import SparklesIcon from './components/icons/SparklesIcon';
 import ResetIcon from './components/icons/ResetIcon';
 import PencilIcon from './components/icons/PencilIcon';
+import QualitySelector from './components/QualitySelector';
 
 const App: React.FC = () => {
     const [personImage, setPersonImage] = useState<string | null>(null);
-    const [outfitImage, setOutfitImage] = useState<string | null>(null);
-    const [styleImage, setStyleImage] = useState<string | null>(null);
-    const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+    const [outfitImages, setOutfitImages] = useState<string[]>([]);
+    const [styleImages, setStyleImages] = useState<string[]>([]);
+    const [generatedResults, setGeneratedResults] = useState<GeneratedResultGroup[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
-    const [additionalInfo, setAdditionalInfo] = useState<string | null>(null);
     const [customPrompt, setCustomPrompt] = useState<string>('');
+    const [quality, setQuality] = useState<Quality>('High');
     
-    const [isVideoLoading, setIsVideoLoading] = useState<boolean>(false);
-    const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
-    const [videoError, setVideoError] = useState<string | null>(null);
-
     const handleReset = useCallback(() => {
         setPersonImage(null);
-        setOutfitImage(null);
-        setStyleImage(null);
-        setGeneratedImages([]);
+        setOutfitImages([]);
+        setStyleImages([]);
+        setGeneratedResults([]);
         setError(null);
-        setAdditionalInfo(null);
         setCustomPrompt('');
-        setGeneratedVideoUrl(null);
-        setVideoError(null);
         setIsLoading(false);
-        setIsVideoLoading(false);
     }, []);
 
     const handleTryOn = useCallback(async () => {
-        if (!personImage || !outfitImage) {
-            setError('Please upload both your photo and an outfit image.');
+        if (!personImage || outfitImages.length === 0) {
+            setError('Please upload your photo and at least one outfit image.');
             return;
         }
 
-        // Reset previous results, but keep inputs
-        setGeneratedImages([]);
+        setGeneratedResults([]);
         setError(null);
-        setAdditionalInfo(null);
-        setGeneratedVideoUrl(null);
-        setVideoError(null);
         setIsLoading(true);
 
-        try {
-            const views: ViewType[] = [ViewType.FRONT, ViewType.LEFT, ViewType.RIGHT, ViewType.BACK];
-            
-            const results = await Promise.all(
-                views.map(view => generateTryOnImage(personImage, outfitImage, styleImage, view, customPrompt))
-            );
-
-            const successfulResults: GeneratedImage[] = [];
-            let apiError: string | null = null;
-            let infoMessage: string | null = null;
-
-            results.forEach((result, index) => {
-                if (result.error) {
-                    if (!apiError) apiError = result.error;
-                } else if (result.image) {
-                    successfulResults.push({
-                        src: result.image,
-                        alt: `${views[index]} view`,
-                        label: views[index]
-                    });
-                    if (result.text && !infoMessage) {
-                        infoMessage = result.text;
-                    }
+        const combinations: { outfit: string; style: string | null }[] = [];
+        if (styleImages.length > 0) {
+            for (const outfit of outfitImages) {
+                for (const style of styleImages) {
+                    combinations.push({ outfit, style });
                 }
-            });
-
-            if (apiError) {
-                setError(apiError);
-            } else {
-                setGeneratedImages(successfulResults);
-                setAdditionalInfo(infoMessage);
             }
+        } else {
+            for (const outfit of outfitImages) {
+                combinations.push({ outfit, style: null });
+            }
+        }
 
+        try {
+            for (const combo of combinations) {
+                const seed = Math.floor(Math.random() * 1000000);
+                const views: ViewType[] = [ViewType.FRONT, ViewType.LEFT, ViewType.RIGHT, ViewType.BACK];
+                
+                const results = await Promise.all(
+                    views.map(view => generateTryOnImage(personImage, combo.outfit, combo.style, view, customPrompt, quality, seed))
+                );
+
+                const successfulViews: GeneratedImage[] = [];
+                let apiError: string | null = null;
+                let infoMessage: string | null = null;
+
+                results.forEach((result, index) => {
+                    if (result.error) {
+                        if (!apiError) apiError = result.error;
+                    } else if (result.image) {
+                        successfulViews.push({
+                            src: result.image,
+                            alt: `${views[index]} view`,
+                            label: views[index]
+                        });
+                        if (result.text && !infoMessage) {
+                            infoMessage = result.text;
+                        }
+                    }
+                });
+
+                if (apiError) {
+                    setError(prevError => `${prevError ? prevError + '\n' : ''}Failed for one combination: ${apiError}`);
+                }
+
+                if (successfulViews.length > 0) {
+                     setGeneratedResults(prev => [...prev, {
+                        id: `${combo.outfit.slice(-10)}-${combo.style?.slice(-10) ?? 'no-style'}`,
+                        outfitImage: combo.outfit,
+                        styleImage: combo.style,
+                        views: successfulViews,
+                        info: infoMessage,
+                    }]);
+                }
+            }
         } catch (err) {
             console.error(err);
-            setError('An unexpected error occurred while generating images. Please try again.');
+            setError('An unexpected error occurred during batch generation. Please try again.');
         } finally {
             setIsLoading(false);
         }
-    }, [personImage, outfitImage, styleImage, customPrompt]);
+    }, [personImage, outfitImages, styleImages, customPrompt, quality]);
     
-    const handleGenerateVideo = useCallback(async () => {
-        const frontViewImage = generatedImages.find(img => img.label === ViewType.FRONT);
-        if (!frontViewImage) {
-            setVideoError("Could not find the front view image, which is required to generate the video.");
+    const handleGenerateVideo = useCallback(async (resultId: string, duration: VideoDuration, animation: AnimationType) => {
+        const resultIndex = generatedResults.findIndex(r => r.id === resultId);
+        if (resultIndex === -1) {
+            console.error("Could not find result group to generate video for.");
             return;
         }
 
-        setIsVideoLoading(true);
-        setVideoError(null);
-        setGeneratedVideoUrl(null);
+        const frontViewImage = generatedResults[resultIndex].views.find(img => img.label === ViewType.FRONT);
+
+        if (!frontViewImage) {
+            setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, videoError: "Front view image not found for this result." } : r));
+            return;
+        }
+
+        setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, isVideoLoading: true, videoError: null, videoUrl: null } : r));
 
         try {
-            const { videoUrl, error } = await generateTryOnVideo(frontViewImage.src);
-
+            const { videoUrl, error } = await generateTryOnVideo(frontViewImage.src, duration, animation);
             if (error) {
-                setVideoError(error);
+                setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, videoError: error } : r));
             } else {
-                setGeneratedVideoUrl(videoUrl);
+                setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, videoUrl } : r));
             }
         } catch (err) {
             console.error(err);
-            setVideoError('An unexpected error occurred while generating the video.');
+            setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, videoError: 'An unexpected error occurred.' } : r));
         } finally {
-            setIsVideoLoading(false);
+            setGeneratedResults(prev => prev.map((r, i) => i === resultIndex ? { ...r, isVideoLoading: false } : r));
         }
-    }, [generatedImages]);
+    }, [generatedResults]);
 
-    const hasContent = personImage || outfitImage || styleImage || generatedImages.length > 0 || customPrompt;
+    const hasContent = personImage || outfitImages.length > 0 || styleImages.length > 0 || generatedResults.length > 0 || customPrompt;
 
     return (
         <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
@@ -134,22 +149,25 @@ const App: React.FC = () => {
                     <div className="p-8">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
                             <ImageUploader 
-                                title="Your Photo" 
-                                onImageUpload={setPersonImage}
+                                title="Your Photo"
+                                onImageUpload={(img) => setPersonImage(img as string | null)}
                                 icon={<UserIcon />}
-                                image={personImage}
+                                images={personImage}
+                                allowCamera
                             />
                             <ImageUploader 
-                                title="Outfit Image" 
-                                onImageUpload={setOutfitImage}
+                                title="Outfit Images" 
+                                onImageUpload={(imgs) => setOutfitImages(imgs as string[] || [])}
                                 icon={<OutfitIcon />}
-                                image={outfitImage}
+                                images={outfitImages}
+                                multiple
                             />
                              <ImageUploader 
                                 title="Style/Pattern (Optional)" 
-                                onImageUpload={setStyleImage}
+                                onImageUpload={(imgs) => setStyleImages(imgs as string[] || [])}
                                 icon={<StyleIcon />}
-                                image={styleImage}
+                                images={styleImages}
+                                multiple
                             />
                         </div>
 
@@ -168,10 +186,14 @@ const App: React.FC = () => {
                             />
                         </div>
 
+                        <div className="mb-8 max-w-sm mx-auto">
+                            <QualitySelector selectedQuality={quality} onQualityChange={setQuality} />
+                        </div>
+
                         <div className="flex justify-center items-center gap-4">
                             <button
                                 onClick={handleTryOn}
-                                disabled={!personImage || !outfitImage || isLoading || isVideoLoading}
+                                disabled={!personImage || outfitImages.length === 0 || isLoading}
                                 className="inline-flex items-center justify-center px-8 py-3 bg-slate-900 text-white font-bold rounded-full text-base hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105"
                             >
                                 <SparklesIcon />
@@ -179,7 +201,7 @@ const App: React.FC = () => {
                             </button>
                             <button
                                 onClick={handleReset}
-                                disabled={!hasContent || isLoading || isVideoLoading}
+                                disabled={!hasContent || isLoading}
                                 className="inline-flex items-center justify-center p-3.5 bg-slate-200 text-slate-600 font-bold rounded-full hover:bg-slate-300 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors duration-300"
                                 aria-label="Reset application"
                             >
@@ -191,62 +213,14 @@ const App: React.FC = () => {
 
                 {error && (
                     <div className="max-w-4xl mx-auto mt-8 p-4 bg-red-100 border border-red-300 text-red-800 rounded-lg text-center">
-                        <p>{error}</p>
-                    </div>
-                )}
-                
-                {additionalInfo && !isLoading && (
-                    <div className="max-w-4xl mx-auto mt-8 p-4 bg-blue-100 border border-blue-300 text-blue-800 rounded-lg text-center">
-                        <p>{additionalInfo}</p>
+                        <p className="whitespace-pre-wrap">{error}</p>
                     </div>
                 )}
 
                 {isLoading && <Loader />}
                 
-                {!isLoading && generatedImages.length > 0 && (
-                     <>
-                        <GeneratedImages images={generatedImages} />
-                        <div className="max-w-6xl mx-auto mt-12 text-center">
-                            {!generatedVideoUrl && !isVideoLoading && (
-                                <button
-                                    onClick={handleGenerateVideo}
-                                    className="inline-flex items-center justify-center px-8 py-3 bg-slate-800 text-white font-bold rounded-full text-base hover:bg-slate-700 transition-all duration-300 transform hover:scale-105"
-                                >
-                                    Generate Video Preview
-                                </button>
-                            )}
-                            
-                            {isVideoLoading && <Loader messages={[
-                                "Preparing video generation...",
-                                "This can take a few minutes, please wait.",
-                                "Animating the 360-degree view...",
-                                "Rendering high-quality video frames...",
-                                "Finalizing the video file...",
-                                "Hang tight, it's worth the wait!"
-                            ]} />}
-
-                            {videoError && (
-                                <div className="mt-4 p-4 max-w-2xl mx-auto bg-red-100 border border-red-300 text-red-800 rounded-lg">
-                                    <p><strong>Video Generation Failed:</strong> {videoError}</p>
-                                </div>
-                            )}
-
-                            {generatedVideoUrl && (
-                                <div className="mt-8">
-                                    <h3 className="text-2xl font-bold mb-4 text-slate-800">Video Preview</h3>
-                                    <video
-                                        key={generatedVideoUrl}
-                                        src={generatedVideoUrl}
-                                        controls
-                                        autoPlay
-                                        loop
-                                        playsInline
-                                        className="w-full max-w-sm mx-auto rounded-xl shadow-lg border border-slate-200"
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    </>
+                {!isLoading && generatedResults.length > 0 && (
+                    <GeneratedImages results={generatedResults} onGenerateVideo={handleGenerateVideo} />
                 )}
             </main>
         </div>
