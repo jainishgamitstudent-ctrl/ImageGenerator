@@ -2,11 +2,11 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import type { ViewType, Quality, AnimationType, VideoDuration } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
+if (!import.meta.env.VITE_API_KEY) {
+    throw new Error("VITE_API_KEY environment variable not set");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
 const fileToGenerativePart = (base64: string, mimeType: string) => {
     return {
@@ -182,7 +182,7 @@ export const generateTryOnVideo = async (
             return { videoUrl: null, error: 'Video generation completed, but no download link was provided by the API.' };
         }
         
-        const res = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+        const res = await fetch(`${downloadLink}&key=${import.meta.env.VITE_API_KEY}`);
         if (!res.ok) {
             const errorBody = await res.text();
             console.error("Failed to download video:", errorBody);
